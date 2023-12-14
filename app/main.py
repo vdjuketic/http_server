@@ -1,4 +1,5 @@
 import socket
+import threading
 
 
 def send_text_plain_response(conn, response):
@@ -8,10 +9,7 @@ def send_text_plain_response(conn, response):
     conn.sendall(f"{response}\r\n\r\n".encode())
 
 
-def main():
-    server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
-    conn, address = server_socket.accept()  # wait for client
-
+def handle_request(conn):
     message = conn.recv(1024).decode()
 
     request = message.split("\r\n")
@@ -40,7 +38,19 @@ def main():
     else:
         conn.sendall(b"HTTP/1.1 404 Not Found\r\n\r\n")
 
-    conn.close()
+
+def main():
+    server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
+
+    try:
+        while True:
+            conn, address = server_socket.accept()  # wait for client
+
+            thread = threading.Thread(target=handle_request, args=(conn,))
+            thread.daemon = True
+            thread.start()
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
