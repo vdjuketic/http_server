@@ -1,56 +1,88 @@
 import socket
 import threading
+import argparse
+from os import listdir
+from os.path import isfile, join
 
 
-def send_text_plain_response(conn, response):
-    conn.sendall(b"HTTP/1.1 200 OK\r\n")
-    conn.sendall(b"Content-Type: text/plain\r\n")
-    conn.sendall(f"Content-Length: {len(response)}\r\n\r\n".encode())
-    conn.sendall(f"{response}\r\n\r\n".encode())
+class HttpServer:
+    def __init__(self, directory):
+        self.directory = directory if directory else ""
 
+    def run(self):
+        server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
 
-def handle_request(conn):
-    message = conn.recv(1024).decode()
+        try:
+            while True:
+                conn, address = server_socket.accept()  # wait for client
 
-    request = message.split("\r\n")
+                thread = threading.Thread(target=self.handle_request, args=(conn,))
+                thread.daemon = True
+                thread.start()
+        finally:
+            conn.close()
 
-    start_line = request[0]
-    http_method, path, http_version = start_line.split(" ")
+    def send_response(self, conn, status, response, content_type="text/plain"):
+        conn.sendall(f"HTTP/1.1 {status}\r\n".encode())
+        conn.sendall(f"Content-Type: {content_type}\r\n".encode())
+        conn.sendall(f"Content-Length: {len(response)}\r\n\r\n".encode())
+        conn.sendall(f"{response}\r\n\r\n".encode())
 
-    headers = {}
-    for i in range(1, len(request) - 1):
-        line = request[i]
-        if ": " in line:
-            header, value = line.split(": ")
-            headers[header] = value
+    def handle_request(self, conn):
+        message = conn.recv(1024).decode()
 
-    if path == "/":
-        conn.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+        request = message.split("\r\n")
 
-    elif path.startswith("/echo"):
-        response = path.removeprefix("/echo/")
-        send_text_plain_response(conn, response)
+        start_line = request[0]
+        http_method, path, http_version = start_line.split(" ")
 
-    elif path == ("/user-agent"):
-        response = headers["User-Agent"]
-        send_text_plain_response(conn, response)
+        headers = {}
+        for i in range(1, len(request) - 1):
+            line = request[i]
+            if ": " in line:
+                header, value = line.split(": ")
+                headers[header] = value
 
-    else:
-        conn.sendall(b"HTTP/1.1 404 Not Found\r\n\r\n")
+        if path == "/":
+            conn.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+
+        elif path.startswith("/echo"):
+            response = path.removeprefix("/echo/")
+            self.send_response(conn, "200 OK", response)
+
+        elif path == ("/user-agent"):
+            response = headers["User-Agent"]
+            self.send_response(conn, "200 OK", response)
+
+        elif path.startswith("/files"):
+            filename = path.removeprefix("/files/")
+            files = [
+                f for f in listdir(self.directory) if isfile(join(self.directory, f))
+            ]
+
+            if filename in files:
+                file_content = ""
+                with open(join(self.directory, filename), "r") as content_file:
+                    file_content = content_file.read()
+                self.send_response(
+                    conn, "200 OK", file_content, "application/octet-stream"
+                )
+            else:
+                self.send_response(conn, "404 Not Found", "")
+
+        else:
+            self.send_response(conn, "404 Not Found", "")
 
 
 def main():
-    server_socket = socket.create_server(("localhost", 4221), reuse_port=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--directory")
+    args = parser.parse_args()
 
-    try:
-        while True:
-            conn, address = server_socket.accept()  # wait for client
+    directory = args.directory
 
-            thread = threading.Thread(target=handle_request, args=(conn,))
-            thread.daemon = True
-            thread.start()
-    finally:
-        conn.close()
+    server = HttpServer(directory)
+    server.run()
 
 
 if __name__ == "__main__":
