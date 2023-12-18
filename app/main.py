@@ -37,24 +37,29 @@ class HttpServer:
         http_method, path, http_version = start_line.split(" ")
 
         headers = {}
-        for i in range(1, len(request) - 1):
+        body = None
+        for i in range(1, len(request)):
             line = request[i]
-            if ": " in line:
+            if line == "":
+                continue
+            elif ": " in line:
                 header, value = line.split(": ")
                 headers[header] = value
+            else:
+                body = line
 
-        if path == "/":
+        if http_method == "GET" and path == "/":
             conn.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
 
-        elif path.startswith("/echo"):
+        elif http_method == "GET" and path.startswith("/echo"):
             response = path.removeprefix("/echo/")
             self.send_response(conn, "200 OK", response)
 
-        elif path == ("/user-agent"):
+        elif http_method == "GET" and path == ("/user-agent"):
             response = headers["User-Agent"]
             self.send_response(conn, "200 OK", response)
 
-        elif path.startswith("/files"):
+        elif http_method == "GET" and path.startswith("/files"):
             filename = path.removeprefix("/files/")
             files = [
                 f for f in listdir(self.directory) if isfile(join(self.directory, f))
@@ -69,6 +74,16 @@ class HttpServer:
                 )
             else:
                 self.send_response(conn, "404 Not Found", "")
+        elif http_method == "POST" and path.startswith("/files"):
+            filename = path.removeprefix("/files/")
+            try:
+                with open(join(self.directory, filename), "wb") as file:
+                    file.write(body.encode())
+                self.send_response(conn, "201 Created", "")
+            except Exception as e:
+                self.send_response(
+                    conn, "500 Internal Server Error", f"Error writing file: {e}"
+                )
 
         else:
             self.send_response(conn, "404 Not Found", "")
